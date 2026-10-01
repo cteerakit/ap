@@ -1,0 +1,10 @@
+node_modules
+out
+dist
+release
+.tmp
+.DS_Store
+.eslintcache
+*.log*
+Thumbs.db
+verify-out.json
