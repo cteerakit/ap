@@ -35,7 +35,7 @@ export function tooltipFor(snapshot: ProviderResult[]): string {
         ? `${name} ${short} ${Math.round(top.usedPercent)}%`
         : `${name} ${Math.round(top.usedPercent)}%`
     })
-  return bits.length > 0 ? bits.join(' / ') : 'ap — no usage data'
+  return bits.length > 0 ? bits.join(' / ') : 'AP — no usage data'
 }
 
 export function maxUsage(snapshot: ProviderResult[]): number | null {

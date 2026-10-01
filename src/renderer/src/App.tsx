@@ -255,8 +255,8 @@ export default function App(): React.JSX.Element {
     <div className="app" ref={rootRef}>
       <header className="top">
         <div>
-          <h1>Usage</h1>
-          <p className="sub">ChatGPT, Claude, Cursor, Antigravity</p>
+          <h1>AP</h1>
+          <p className="sub">AI Points</p>
         </div>
         <button
           className={refreshing ? 'btn btn-icon spinning' : 'btn btn-icon'}

@@ -240,7 +240,7 @@ if (!gotLock) {
 
     popup = createPopup()
     tray = new Tray(trayIcon('green'))
-    tray.setToolTip('ap')
+    tray.setToolTip('AP')
     tray.setContextMenu(buildMenu())
     tray.on('click', () => togglePopup())
     applyTray(poller.snapshot)

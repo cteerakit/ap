@@ -1,5 +1,5 @@
 appId: com.cteerakit.ap
-productName: ap
+productName: AP
 directories:
   buildResources: build
   output: release
@@ -22,7 +22,7 @@ extraResources:
   - from: node_modules/sql.js/dist/sql-wasm.wasm
     to: sql-wasm.wasm
 win:
-  executableName: ap
+  executableName: AP
   icon: build/icon.png
 nsis:
   artifactName: ${name}-${version}-setup.${ext}

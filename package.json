@@ -1,7 +1,7 @@
 {
   "name": "ap",
   "version": "1.0.0",
-  "description": "Windows tray app for ChatGPT, Claude, Cursor and Antigravity usage limits",
+  "description": "AP (AI Points) — Windows tray app for ChatGPT, Claude, Cursor and Antigravity usage limits",
   "main": "./out/main/index.js",
   "author": "cteerakit",
   "homepage": "https://github.com/cteerakit/ap",
