@@ -18,6 +18,13 @@ const LABELS: Record<string, string> = {
   seven_day_sonnet: 'Weekly (Sonnet)'
 }
 
+const PERIOD_SECONDS: Record<string, number> = {
+  five_hour: 5 * 3600,
+  seven_day: 7 * 24 * 3600,
+  seven_day_opus: 7 * 24 * 3600,
+  seven_day_sonnet: 7 * 24 * 3600
+}
+
 function parseWindows(data: Record<string, unknown>): UsageWindow[] {
   const out: UsageWindow[] = []
   for (const [key, label] of Object.entries(LABELS)) {
@@ -28,7 +35,12 @@ function parseWindows(data: Record<string, unknown>): UsageWindow[] {
       typeof (w as { utilization?: unknown }).utilization === 'number'
     ) {
       const rec = w as { utilization: number; resets_at?: unknown }
-      out.push({ label, usedPercent: clampPct(rec.utilization), resetsAt: toIso(rec.resets_at) })
+      out.push({
+        label,
+        usedPercent: clampPct(rec.utilization),
+        resetsAt: toIso(rec.resets_at),
+        periodSeconds: PERIOD_SECONDS[key]
+      })
     }
   }
   return out

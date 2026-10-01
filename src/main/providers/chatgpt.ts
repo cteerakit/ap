@@ -30,7 +30,11 @@ function parseWindow(label: string, w: unknown): UsageWindow | null {
   if (!resetsAt && typeof rec.reset_after_seconds === 'number') {
     resetsAt = new Date(Date.now() + rec.reset_after_seconds * 1000).toISOString()
   }
-  return { label, usedPercent: clampPct(rec.used_percent), resetsAt }
+  const periodSeconds =
+    typeof rec.limit_window_seconds === 'number' && rec.limit_window_seconds > 0
+      ? rec.limit_window_seconds
+      : undefined
+  return { label, usedPercent: clampPct(rec.used_percent), resetsAt, periodSeconds }
 }
 
 export async function fetchChatGPT(): Promise<ProviderResult> {
@@ -84,8 +88,12 @@ export async function fetchChatGPT(): Promise<ProviderResult> {
     const crw = parseWindow('Code review (weekly)', cr)
     if (crw) windows.push(crw)
 
+    const planName = [data.plan_name, data.plan_type].find((v) => typeof v === 'string') as
+      | string
+      | undefined
+
     return result('chatgpt', 'ok', {
-      plan: typeof data.plan_type === 'string' ? data.plan_type : undefined,
+      plan: planName,
       windows
     })
   } catch (e) {

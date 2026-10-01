@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { ProviderId, ProviderResult, ProviderStatus, UsageWindow } from '../../shared/types'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { ProviderId, ProviderResult, UsageWindow } from '../../shared/types'
+import chatgptIcon from './assets/icons/chatgpt.png'
+import claudeIcon from './assets/icons/claude.png'
+import cursorIcon from './assets/icons/cursor.png'
+import antigravityIcon from './assets/icons/antigravity.png'
 
 const ORDER: ProviderId[] = ['chatgpt', 'claude', 'cursor', 'antigravity']
 
@@ -10,24 +14,92 @@ const PROVIDER_NAMES: Record<ProviderId, string> = {
   antigravity: 'Antigravity'
 }
 
+const PROVIDER_ICONS: Record<ProviderId, string> = {
+  chatgpt: chatgptIcon,
+  claude: claudeIcon,
+  cursor: cursorIcon,
+  antigravity: antigravityIcon
+}
+
+const PLAN_DISPLAY: Record<string, string> = {
+  'pro plus': 'Pro+',
+  'pro+': 'Pro+'
+}
+
+function formatPlanName(plan?: string): string | null {
+  if (!plan) return null
+  const spaced = plan
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!spaced) return null
+  const mapped = PLAN_DISPLAY[spaced.toLowerCase()]
+  if (mapped) return mapped
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1).toLowerCase()
+}
+
+function ProviderIcon({ id }: { id: ProviderId }): React.JSX.Element {
+  return <img className="provider-icon" src={PROVIDER_ICONS[id]} alt="" />
+}
+
+function RefreshIcon(): React.JSX.Element {
+  return (
+    <svg className="btn-icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M21 12a9 9 0 1 1-2.6-6.36M21 3v6h-6"
+      />
+    </svg>
+  )
+}
+
 function barClass(pct: number): string {
   if (pct >= 90) return 'bar-fill high'
   if (pct >= 70) return 'bar-fill mid'
   return 'bar-fill'
 }
 
+function sentenceCase(s: string): string {
+  const i = s.search(/\S/)
+  if (i < 0) return s
+  return s.slice(0, i) + s.charAt(i).toUpperCase() + s.slice(i + 1)
+}
+
 function formatCountdown(iso?: string, now = Date.now()): string {
   if (!iso) return ''
   const ms = Date.parse(iso) - now
   if (Number.isNaN(ms)) return ''
-  if (ms <= 0) return 'resets soon'
+  if (ms <= 0) return 'Resets soon'
   const totalMin = Math.floor(ms / 60_000)
   const days = Math.floor(totalMin / (60 * 24))
   const hours = Math.floor((totalMin - days * 60 * 24) / 60)
   const mins = totalMin % 60
-  if (days > 0) return `resets in ${days}d ${hours}h`
-  if (hours > 0) return `resets in ${hours}h ${mins}m`
-  return `resets in ${mins}m`
+  if (days > 0) return `Resets in ${days}d ${hours}h`
+  if (hours > 0) return `Resets in ${hours}h ${mins}m`
+  return `Resets in ${mins}m`
+}
+
+function periodSecondsFromLabel(label: string): number | undefined {
+  const hours = label.match(/(\d+)-hour/i)
+  if (hours) return Number(hours[1]) * 3600
+  if (/weekly/i.test(label)) return 7 * 24 * 3600
+  return undefined
+}
+
+function periodElapsedPercent(win: UsageWindow, now: number): number | null {
+  const periodSeconds = win.periodSeconds ?? periodSecondsFromLabel(win.label)
+  if (!win.resetsAt || !periodSeconds || periodSeconds <= 0) return null
+  const reset = Date.parse(win.resetsAt)
+  if (Number.isNaN(reset)) return null
+  const elapsed = periodSeconds * 1000 - (reset - now)
+  const pct = (elapsed / (periodSeconds * 1000)) * 100
+  if (!Number.isFinite(pct)) return null
+  return Math.max(0, Math.min(100, pct))
 }
 
 function formatAmount(n?: number): string | null {
@@ -37,19 +109,17 @@ function formatAmount(n?: number): string | null {
   return n.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
-function statusLabel(status: ProviderStatus): string {
-  switch (status) {
-    case 'ok':
-      return 'OK'
-    case 'not_found':
-      return 'Not found'
-    case 'expired':
-      return 'Expired'
-    case 'not_running':
-      return 'Not running'
-    default:
-      return 'Error'
-  }
+function formatRelative(iso: string, now: number): string {
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return ''
+  const sec = Math.max(0, Math.round((now - t) / 1000))
+  if (sec < 60) return 'Just now'
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h ago`
+  const day = Math.floor(hr / 24)
+  return `${day}d ago`
 }
 
 function WindowRow({ win, now }: { win: UsageWindow; now: number }): React.JSX.Element {
@@ -57,17 +127,38 @@ function WindowRow({ win, now }: { win: UsageWindow; now: number }): React.JSX.E
   const limit = formatAmount(win.limit)
   const counts = used && limit ? `${used} / ${limit}` : null
   const reset = formatCountdown(win.resetsAt, now)
+  const elapsed = periodElapsedPercent(win, now)
+  const pace =
+    elapsed == null
+      ? null
+      : win.usedPercent > elapsed + 2
+        ? 'Ahead of even pace'
+        : win.usedPercent < elapsed - 2
+          ? 'Behind even pace'
+          : 'On even pace'
   return (
     <div className="window">
       <div className="window-head">
-        <span className="window-label">{win.label}</span>
+        <span className="window-label">{sentenceCase(win.label)}</span>
         <span className="window-pct">{Math.round(win.usedPercent)}%</span>
       </div>
-      <div className="bar">
-        <div
-          className={barClass(win.usedPercent)}
-          style={{ width: `${Math.min(100, win.usedPercent)}%` }}
-        />
+      <div
+        className="bar"
+        title={
+          elapsed == null
+            ? undefined
+            : `${Math.round(elapsed)}% through period · ${pace}`
+        }
+      >
+        <div className="bar-track">
+          <div
+            className={barClass(win.usedPercent)}
+            style={{ width: `${Math.min(100, win.usedPercent)}%` }}
+          />
+        </div>
+        {elapsed != null ? (
+          <div className="bar-tick" style={{ left: `${elapsed}%` }} />
+        ) : null}
       </div>
       <div className="window-meta">
         {counts ? <span>{counts}</span> : <span />}
@@ -78,16 +169,20 @@ function WindowRow({ win, now }: { win: UsageWindow; now: number }): React.JSX.E
 }
 
 function Card({ provider, now }: { provider: ProviderResult; now: number }): React.JSX.Element {
+  const plan = formatPlanName(provider.plan)
   return (
     <article className="card">
       <header className="card-head">
-        <div>
+        <div className="card-title">
+          <ProviderIcon id={provider.id} />
           <h2>{PROVIDER_NAMES[provider.id]}</h2>
-          {provider.plan ? <p className="plan">{provider.plan}</p> : null}
+          {plan ? <span className="plan">{plan}</span> : null}
         </div>
-        <span className={`badge badge-${provider.status}`}>{statusLabel(provider.status)}</span>
+        <span className="updated" title={new Date(provider.fetchedAt).toLocaleString()}>
+          {formatRelative(provider.fetchedAt, now)}
+        </span>
       </header>
-      {provider.status === 'ok' && provider.windows.length > 0 ? (
+      {provider.windows.length > 0 ? (
         <div className="windows">
           {provider.windows.map((w) => (
             <WindowRow key={w.label} win={w} now={now} />
@@ -104,7 +199,6 @@ function Card({ provider, now }: { provider: ProviderResult; now: number }): Rea
 
 export default function App(): React.JSX.Element {
   const [snapshot, setSnapshot] = useState<ProviderResult[]>([])
-  const [openAtLogin, setOpenAtLogin] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [now, setNow] = useState(() => Date.now())
 
@@ -117,9 +211,6 @@ export default function App(): React.JSX.Element {
     let cancelled = false
     void window.ap.get().then((s) => {
       if (!cancelled) setSnapshot(s)
-    })
-    void window.ap.getOpenAtLogin().then((v) => {
-      if (!cancelled) setOpenAtLogin(v)
     })
     const off = window.ap.onUpdate((s) => setSnapshot(s))
     return () => {
@@ -138,25 +229,44 @@ export default function App(): React.JSX.Element {
     }
   }, [])
 
-  const toggleLogin = useCallback(async () => {
-    const next = await window.ap.setOpenAtLogin(!openAtLogin)
-    setOpenAtLogin(next)
-  }, [openAtLogin])
-
   const cards = useMemo(() => {
     const byId = new Map(snapshot.map((p) => [p.id, p]))
     return ORDER.map((id) => byId.get(id)).filter((p): p is ProviderResult => !!p)
   }, [snapshot])
 
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    const el = rootRef.current
+    if (!el || typeof window.ap.setPopupHeight !== 'function') return
+
+    const report = (): void => {
+      const height = Math.ceil(Math.max(el.scrollHeight, el.getBoundingClientRect().height))
+      if (height > 0) window.ap.setPopupHeight(height)
+    }
+
+    report()
+    const observer = new ResizeObserver(report)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [cards])
+
   return (
-    <div className="app">
+    <div className="app" ref={rootRef}>
       <header className="top">
         <div>
           <h1>Usage</h1>
           <p className="sub">ChatGPT, Claude, Cursor, Antigravity</p>
         </div>
-        <button className="btn" type="button" onClick={() => void refresh()} disabled={refreshing}>
-          {refreshing ? 'Refreshing…' : 'Refresh'}
+        <button
+          className={refreshing ? 'btn btn-icon spinning' : 'btn btn-icon'}
+          type="button"
+          onClick={() => void refresh()}
+          disabled={refreshing}
+          aria-label={refreshing ? 'Refreshing' : 'Refresh'}
+          title="Refresh"
+        >
+          <RefreshIcon />
         </button>
       </header>
       <main className="cards">
@@ -165,15 +275,6 @@ export default function App(): React.JSX.Element {
           <Card key={p.id} provider={p} now={now} />
         ))}
       </main>
-      <footer className="foot">
-        <label className="check">
-          <input type="checkbox" checked={openAtLogin} onChange={() => void toggleLogin()} />
-          Open at login
-        </label>
-        <button className="btn ghost" type="button" onClick={() => void window.ap.quit()}>
-          Quit
-        </button>
-      </footer>
     </div>
   )
 }

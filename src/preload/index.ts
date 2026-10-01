@@ -11,9 +11,9 @@ const api = {
   },
   refresh: (): Promise<ProviderResult[]> => ipcRenderer.invoke('usage:refresh'),
   get: (): Promise<ProviderResult[]> => ipcRenderer.invoke('usage:get'),
-  quit: (): Promise<void> => ipcRenderer.invoke('app:quit'),
-  getOpenAtLogin: (): Promise<boolean> => ipcRenderer.invoke('login:get'),
-  setOpenAtLogin: (value: boolean): Promise<boolean> => ipcRenderer.invoke('login:set', value)
+  setPopupHeight: (height: number): void => {
+    ipcRenderer.send('popup:height', height)
+  }
 }
 
 contextBridge.exposeInMainWorld('ap', api)

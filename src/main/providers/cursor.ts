@@ -7,6 +7,7 @@ import {
   clampPct,
   decodeJwt,
   fetchJson,
+  periodSecondsBetween,
   result,
   toIso,
   type ProviderResult,
@@ -85,6 +86,39 @@ async function readAccessToken(): Promise<string | null> {
   }
 }
 
+function percentFromMessage(msg: unknown): number | undefined {
+  if (typeof msg !== 'string') return undefined
+  const m = msg.match(/(\d+(?:\.\d+)?)\s*%/)
+  if (!m) return undefined
+  const n = Number(m[1])
+  return Number.isFinite(n) ? n : undefined
+}
+
+function pushPercentWindow(
+  windows: UsageWindow[],
+  label: string,
+  pct: unknown,
+  resetsAt?: string,
+  periodSeconds?: number
+): void {
+  if (typeof pct !== 'number' || !Number.isFinite(pct)) return
+  if (windows.some((w) => w.label === label)) return
+  windows.push({ label, usedPercent: clampPct(pct), resetsAt, periodSeconds })
+}
+
+function cyclePeriod(s: Record<string, unknown>): { resetsAt?: string; periodSeconds?: number } {
+  const resetsAt = toIso(s.billingCycleEnd)
+  const start = toIso(s.billingCycleStart ?? s.billingCycleBegin ?? s.startOfMonth)
+  let periodSeconds = periodSecondsBetween(start, resetsAt)
+  if (!periodSeconds && resetsAt) {
+    const end = Date.parse(resetsAt)
+    const prior = new Date(end)
+    prior.setUTCMonth(prior.getUTCMonth() - 1)
+    periodSeconds = Math.round((end - prior.getTime()) / 1000)
+  }
+  return { resetsAt, periodSeconds }
+}
+
 function cookieFromJwt(raw: string): { cookie: string; userId: string | null } {
   let jwt = raw.trim()
   let userId: string | null = null
@@ -131,33 +165,34 @@ export async function fetchCursor(): Promise<ProviderResult> {
       unknown
     >
     plan = typeof s.membershipType === 'string' ? s.membershipType : undefined
-    const resetsAt = toIso(s.billingCycleEnd)
+    const { resetsAt, periodSeconds } = cyclePeriod(s)
     const ind = s.individualUsage as Record<string, unknown> | undefined
     const p = ind?.plan as Record<string, unknown> | undefined
-    if (p && typeof p.used === 'number') {
-      const limit = typeof p.limit === 'number' && p.limit > 0 ? p.limit : undefined
-      const pct =
-        typeof p.totalPercentUsed === 'number'
-          ? p.totalPercentUsed
-          : limit
-            ? (p.used / limit) * 100
-            : 0
-      windows.push({
-        label: 'Included usage',
-        usedPercent: clampPct(pct),
-        used: p.used,
-        limit,
-        resetsAt
-      })
-    }
+    pushPercentWindow(windows, 'Cursor models', p?.autoPercentUsed, resetsAt, periodSeconds)
+    pushPercentWindow(windows, 'Other models', p?.apiPercentUsed, resetsAt, periodSeconds)
+    pushPercentWindow(
+      windows,
+      'Cursor models',
+      percentFromMessage(s.autoModelSelectedDisplayMessage),
+      resetsAt,
+      periodSeconds
+    )
+    pushPercentWindow(
+      windows,
+      'Other models',
+      percentFromMessage(s.namedModelSelectedDisplayMessage),
+      resetsAt,
+      periodSeconds
+    )
     const od = ind?.onDemand as Record<string, unknown> | undefined
-    if (od && typeof od.used === 'number' && typeof od.limit === 'number' && od.limit > 0) {
+    if (od && typeof od.used === 'number' && od.used > 0 && typeof od.limit === 'number' && od.limit > 0) {
       windows.push({
         label: 'On-demand spend',
         usedPercent: clampPct((od.used / od.limit) * 100),
         used: od.used,
         limit: od.limit,
-        resetsAt
+        resetsAt,
+        periodSeconds
       })
     }
   } catch (e) {
@@ -178,6 +213,7 @@ export async function fetchCursor(): Promise<ProviderResult> {
       const resetsAt = start
         ? new Date(new Date(start).setUTCMonth(new Date(start).getUTCMonth() + 1)).toISOString()
         : undefined
+      const periodSeconds = periodSecondsBetween(start, resetsAt)
       for (const [model, m] of Object.entries(u)) {
         if (
           m &&
@@ -191,7 +227,8 @@ export async function fetchCursor(): Promise<ProviderResult> {
               usedPercent: clampPct((rec.numRequests / rec.maxRequestUsage) * 100),
               used: rec.numRequests,
               limit: rec.maxRequestUsage,
-              resetsAt
+              resetsAt,
+              periodSeconds
             })
           }
         }

@@ -6,7 +6,7 @@ import { colorForUsage, trayIcon } from './icon'
 import type { ProviderResult } from './providers/types'
 
 const POPUP_WIDTH = 380
-const POPUP_HEIGHT = 640
+const POPUP_MIN_HEIGHT = 80
 
 let popup: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -16,6 +16,9 @@ let blurTimer: NodeJS.Timeout | null = null
 
 function sendSnapshot(snapshot: ProviderResult[]): void {
   popup?.webContents.send('usage:update', snapshot)
+  setTimeout(() => {
+    void fitPopupToContent()
+  }, 50)
 }
 
 function applyTray(snapshot: ProviderResult[]): void {
@@ -25,7 +28,17 @@ function applyTray(snapshot: ProviderResult[]): void {
   tray.setToolTip(tooltipFor(snapshot))
 }
 
+function popupHeight(): number {
+  return popup?.getContentSize()[1] ?? POPUP_MIN_HEIGHT
+}
+
+function maxPopupHeight(): number {
+  const origin = popup?.getBounds() ?? { x: 0, y: 0 }
+  return screen.getDisplayNearestPoint(origin).workArea.height - 16
+}
+
 function popupPosition(): { x: number; y: number } {
+  const height = popupHeight()
   const trayBounds = tray?.getBounds() ?? { x: 0, y: 0, width: 0, height: 0 }
   const display = screen.getDisplayNearestPoint({
     x: Math.round(trayBounds.x),
@@ -33,13 +46,55 @@ function popupPosition(): { x: number; y: number } {
   })
   const work = display.workArea
   let x = Math.round(trayBounds.x + trayBounds.width / 2 - POPUP_WIDTH / 2)
-  let y = Math.round(trayBounds.y - POPUP_HEIGHT)
+  let y = Math.round(trayBounds.y - height)
   if (trayBounds.y < work.y + work.height / 2) {
     y = Math.round(trayBounds.y + trayBounds.height)
   }
   x = Math.min(Math.max(x, work.x + 8), work.x + work.width - POPUP_WIDTH - 8)
-  y = Math.min(Math.max(y, work.y + 8), work.y + work.height - POPUP_HEIGHT - 8)
+  y = Math.min(Math.max(y, work.y + 8), work.y + work.height - height - 8)
   return { x, y }
+}
+
+function contentHeightScript(): string {
+  return `(() => {
+    const app = document.querySelector('.app')
+    if (!(app instanceof HTMLElement)) return 0
+    return Math.ceil(Math.max(app.scrollHeight, app.getBoundingClientRect().height))
+  })()`
+}
+
+function setPopupHeight(height: number): void {
+  if (!popup || height < 1) return
+  const maxH = maxPopupHeight()
+  const desired = Math.round(Math.min(Math.max(height, POPUP_MIN_HEIGHT), maxH))
+  const [, current] = popup.getContentSize()
+  popup.setMinimumSize(POPUP_WIDTH, POPUP_MIN_HEIGHT)
+  popup.setMaximumSize(POPUP_WIDTH, maxH)
+  if (current !== desired) {
+    popup.setContentSize(POPUP_WIDTH, desired)
+    const [, contentH] = popup.getContentSize()
+    if (contentH !== desired) {
+      const [, windowH] = popup.getSize()
+      popup.setSize(POPUP_WIDTH, desired + Math.max(0, windowH - contentH))
+    }
+  }
+  const [w, h] = popup.getSize()
+  popup.setMinimumSize(w, h)
+  popup.setMaximumSize(w, h)
+  if (popup.isVisible()) {
+    const { x, y } = popupPosition()
+    popup.setPosition(x, y, false)
+  }
+}
+
+async function fitPopupToContent(): Promise<void> {
+  if (!popup) return
+  try {
+    const height = await popup.webContents.executeJavaScript(contentHeightScript())
+    if (typeof height === 'number' && height > 0) setPopupHeight(height)
+  } catch {
+    // Renderer may not be ready yet.
+  }
 }
 
 function showPopup(): void {
@@ -48,10 +103,13 @@ function showPopup(): void {
     clearTimeout(blurTimer)
     blurTimer = null
   }
-  const { x, y } = popupPosition()
-  popup.setPosition(x, y, false)
-  popup.show()
-  popup.focus()
+  void fitPopupToContent().then(() => {
+    if (!popup) return
+    const { x, y } = popupPosition()
+    popup.setPosition(x, y, false)
+    popup.show()
+    popup.focus()
+  })
 }
 
 function hidePopup(): void {
@@ -94,10 +152,13 @@ function buildMenu(): Menu {
 function createPopup(): BrowserWindow {
   const win = new BrowserWindow({
     width: POPUP_WIDTH,
-    height: POPUP_HEIGHT,
+    height: 900,
+    useContentSize: true,
     show: false,
     frame: false,
-    resizable: false,
+    resizable: true,
+    maximizable: false,
+    minimizable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
     fullscreenable: false,
@@ -182,6 +243,7 @@ if (!gotLock) {
     tray.setToolTip('ap')
     tray.setContextMenu(buildMenu())
     tray.on('click', () => togglePopup())
+    applyTray(poller.snapshot)
 
     poller.onChange = (snapshot) => {
       applyTray(snapshot)
@@ -191,15 +253,8 @@ if (!gotLock) {
 
     ipcMain.handle('usage:refresh', () => poller!.refresh())
     ipcMain.handle('usage:get', () => poller!.snapshot)
-    ipcMain.handle('login:get', () => app.getLoginItemSettings().openAtLogin)
-    ipcMain.handle('login:set', (_e, value: boolean) => {
-      app.setLoginItemSettings({ openAtLogin: value, openAsHidden: true })
-      tray?.setContextMenu(buildMenu())
-      return app.getLoginItemSettings().openAtLogin
-    })
-    ipcMain.handle('app:quit', () => {
-      isQuitting = true
-      app.quit()
+    ipcMain.on('popup:height', (_e, height: number) => {
+      if (typeof height === 'number' && Number.isFinite(height)) setPopupHeight(height)
     })
 
     poller.start()

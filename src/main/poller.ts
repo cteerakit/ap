@@ -1,3 +1,4 @@
+import { keepLastUsage, loadCache, saveCache } from './cache'
 import { PROVIDERS, emptySnapshot } from './providers'
 import { PROVIDER_NAMES } from '../shared/types'
 import { result, type ProviderResult } from './providers/types'
@@ -49,10 +50,15 @@ export function maxUsage(snapshot: ProviderResult[]): number | null {
 }
 
 export class Poller {
-  snapshot: ProviderResult[] = emptySnapshot()
+  snapshot: ProviderResult[]
   onChange: ((snapshot: ProviderResult[]) => void) | null = null
   private timer: NodeJS.Timeout | null = null
   private inflight: Promise<ProviderResult[]> | null = null
+
+  constructor() {
+    const cached = loadCache()
+    this.snapshot = cached.length > 0 ? cached : emptySnapshot()
+  }
 
   start(): void {
     void this.refresh()
@@ -84,12 +90,14 @@ export class Poller {
         )
       )
     )
-    this.snapshot = settled.map((s, i) => {
+    const fresh = settled.map((s, i) => {
       if (s.status === 'fulfilled') return s.value
       return result(PROVIDERS[i].id, 'error', {
         message: s.reason instanceof Error ? s.reason.message : String(s.reason)
       })
     })
+    this.snapshot = keepLastUsage(fresh, this.snapshot)
+    saveCache(this.snapshot)
     this.onChange?.(this.snapshot)
     return this.snapshot
   }

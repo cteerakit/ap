@@ -6,6 +6,8 @@ export interface UsageWindow {
   label: string
   usedPercent: number
   resetsAt?: string
+  /** Full length of this limit window, used to mark how far through the period we are. */
+  periodSeconds?: number
   used?: number
   limit?: number
 }

@@ -24,6 +24,13 @@ export function clampPct(n: number): number {
   return Math.max(0, Math.min(100, n))
 }
 
+export function periodSecondsBetween(start?: string, end?: string): number | undefined {
+  if (!start || !end) return undefined
+  const ms = Date.parse(end) - Date.parse(start)
+  if (!Number.isFinite(ms) || ms <= 0) return undefined
+  return Math.round(ms / 1000)
+}
+
 export function toIso(v: unknown): string | undefined {
   if (v == null) return undefined
   if (typeof v === 'number') {
